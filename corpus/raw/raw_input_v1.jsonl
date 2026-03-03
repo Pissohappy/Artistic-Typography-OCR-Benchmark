@@ -1,0 +1,5 @@
+{"raw_text":"Read me","language":"en","script":"Latin","source_type":"instruction_template","semantic_type":"semantic","prompt_style":"imperative"}
+{"raw_text":"What is the weather today?","language":"en","script":"Latin","source_type":"qa_question","semantic_type":"semantic","prompt_style":"qa"}
+{"raw_text":"A1B2-C3D4","language":"en","script":"Latin","source_type":"structured_string","semantic_type":"nonsemantic","prompt_style":"alnum"}
+{"raw_text":"L0REM_IPSUM_92","language":"en","script":"Latin","source_type":"pseudo_string","semantic_type":"mixed","prompt_style":"pseudo"}
+{"raw_text":"Design typography benchmark manifests with stable schema","language":"en","script":"Latin","source_type":"instruction_template","semantic_type":"semantic","prompt_style":"instruction"}
