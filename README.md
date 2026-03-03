@@ -58,17 +58,17 @@
 1. **Corpus 层**：清洗、标准化、去重、统计、长度分桶，输出 `corpus_master_v1.jsonl`。  
 2. **Length Bucket 层**：`LengthBucketStrategy` 独立模块，可替换策略版本。  
 3. **Plan 层**：基于 `text_id` 先切 split，再做长度感知 route 分配，输出 `plans_v1.jsonl`。  
-4. **Render Route 层**：统一 `Renderer` + route 适配器（当前为 mock/stub，可无外部依赖跑通）。  
+4. **Render Route 层**：统一 `Renderer` + route 适配器（默认真实 SVG 渲染，可选外部引擎增强）。  
 5. **Output Manifest 层**：汇总 `all.jsonl` + `train/val/test.jsonl`。  
 6. **QC 层**：生成 `failures.jsonl` 与 `qc_summary.json`。
 
-## 渲染路线（当前可运行 mock）
+## 渲染路线（已实现真实渲染）
 
 - `route_trdg_basic`: 短文本、单行。
 - `route_synthtiger_multiline`: 中长文本、多行。
 - `route_synthtiger_svg_im`: 强风格 SVG + 后处理路线占位。
 
-当前默认写入 `.ppm` 占位图，保证流程可跑。后续可在 `renderers.py` 的适配器中接入：
+当前默认输出真实 SVG 文本图（非 mock）。`route_synthtiger_svg_im` 会优先调用 Inkscape/ImageMagick 做位图后处理；若未安装则保留 SVG 输出，并在 metadata 中标注降级信息。
 
 - TRDG
 - SynthTIGER

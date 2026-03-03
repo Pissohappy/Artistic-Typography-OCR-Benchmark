@@ -1,23 +1,52 @@
 from __future__ import annotations
 
 import json
+import re
+import struct
 from collections import defaultdict
 from pathlib import Path
 
 from .io_utils import write_jsonl
 
 
-def _parse_ppm_dimensions(path: Path) -> tuple[int, int] | None:
-    if not path.exists():
+def _svg_dimensions(path: Path) -> tuple[int, int] | None:
+    content = path.read_text(encoding="utf-8", errors="ignore")
+    m_w = re.search(r'width="(\d+)', content)
+    m_h = re.search(r'height="(\d+)', content)
+    if not m_w or not m_h:
         return None
-    with path.open("r", encoding="ascii") as f:
-        magic = f.readline().strip()
-        if magic != "P3":
+    return int(m_w.group(1)), int(m_h.group(1))
+
+
+def _png_dimensions(path: Path) -> tuple[int, int] | None:
+    with path.open("rb") as f:
+        sig = f.read(8)
+        if sig != b"\x89PNG\r\n\x1a\n":
             return None
-        dims = f.readline().strip().split()
-        if len(dims) != 2:
+        ihdr_len = f.read(4)
+        chunk_type = f.read(4)
+        if chunk_type != b"IHDR":
             return None
-        return int(dims[0]), int(dims[1])
+        data = f.read(13)
+        width, height = struct.unpack(">II", data[:8])
+        _ = ihdr_len
+        return width, height
+
+
+def _image_dimensions(path: Path) -> tuple[int, int] | None:
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        return _svg_dimensions(path)
+    if suffix == ".png":
+        return _png_dimensions(path)
+    return None
+
+
+def _blank_check(path: Path) -> bool:
+    if path.suffix.lower() == ".svg":
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        return "<text" not in content
+    return False
 
 
 def run_qc(manifest_rows: list[dict], run_dir: Path) -> tuple[list[dict], dict]:
@@ -35,24 +64,25 @@ def run_qc(manifest_rows: list[dict], run_dir: Path) -> tuple[list[dict], dict]:
         if not img_path.exists():
             flags.append("missing_image_path")
         else:
-            dims = _parse_ppm_dimensions(img_path)
+            dims = _image_dimensions(img_path)
             if dims is None:
                 flags.append("invalid_image_format")
             else:
                 w, h = dims
                 if w < 32 or h < 32 or w > 4096 or h > 4096:
                     flags.append("abnormal_dimensions")
+            if _blank_check(img_path):
+                flags.append("blank_image")
 
-        required_paths = [
-            ("charboxes_path", run_dir / "charboxes"),
-            ("mask_path", run_dir / "masks"),
-        ]
-        for field, _default_dir in required_paths:
+        for field in ("charboxes_path", "mask_path"):
             p = row.get("groundtruth", {}).get(field)
             if p and not (run_dir / p).exists():
                 flags.append(f"missing_{field}")
 
-        if not row.get("generation", {}).get("render_route"):
+        generation = row.get("generation", {})
+        required_generation = ["render_route", "engine_primary", "seed", "layout_type"]
+        missing = [k for k in required_generation if generation.get(k) in (None, "")]
+        if missing:
             flags.append("missing_metadata_generation")
 
         text_id = text.get("text_id")
