@@ -4,7 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from art_ocr_benchmark.pipeline import run_pipeline
+from src.art_ocr_benchmark.pipeline import run_pipeline
 
 
 def main() -> None:
