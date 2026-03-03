@@ -1,0 +1,16 @@
+{
+  "run_id": "run_0001",
+  "seed": 202501,
+  "config_version": "v1",
+  "splits": {
+    "train": 0.8,
+    "val": 0.1,
+    "test": 0.1
+  },
+  "paths": {
+    "raw_corpus": "corpus/raw/raw_input_v1.jsonl",
+    "corpus_master": "corpus/normalized/corpus_master_v1.jsonl",
+    "plans": "corpus/splits/plans_v1.jsonl",
+    "run_dir": "runs/run_0001"
+  }
+}
