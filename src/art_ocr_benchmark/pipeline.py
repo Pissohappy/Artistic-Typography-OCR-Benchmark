@@ -52,6 +52,7 @@ def run_pipeline(config_path: Path) -> None:
             style_family=p.style_family,
             font_class=p.font_class,
             degradation_profile=p.degradation_profile,
+            language=text.language,
         )
         render_outputs[p.plan_id] = result.__dict__
 

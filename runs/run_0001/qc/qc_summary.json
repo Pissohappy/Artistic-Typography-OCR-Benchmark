@@ -1,6 +1,6 @@
 {
   "total_records": 5,
-  "valid_records": 5,
-  "invalid_records": 0,
+  "valid_records": 2,
+  "invalid_records": 3,
   "split_leak_text_ids": 0
 }

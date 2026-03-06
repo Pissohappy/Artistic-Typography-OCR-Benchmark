@@ -58,6 +58,7 @@ class Renderer:
         style_family: str,
         font_class: str,
         degradation_profile: str,
+        language: str = "en",
     ) -> RenderResult:
         raise NotImplementedError
 
@@ -129,8 +130,9 @@ class SvgTextRenderer(Renderer):
         style_family: str,
         font_class: str,
         degradation_profile: str,
+        language: str = "en",
     ) -> RenderResult:
-        _ = seed
+        _ = seed, language  # SVG 渲染器不区分语言
         width = max(self.config.canvas_width, min(2200, len(text) * 16 + 120))
         height = self.config.canvas_height
         if layout_type == "single_line":
@@ -194,20 +196,281 @@ class SvgImRenderer(SvgTextRenderer):
         return base
 
 
+class SynthTigerRenderer(Renderer):
+    """真正的 SynthTiger 渲染器，通过 Python API 调用。"""
+
+    route_name = "route_synthtiger_multiline"
+
+    # 默认字体映射（可根据系统调整）
+    DEFAULT_FONTS = {
+        "en_sans": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "en_serif": "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "en_display": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "zh_sans": "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    }
+
+    def __init__(self, executor: CommandExecutor, config: RouteConfig, artistic: bool = False):
+        super().__init__(executor, config)
+        self.artistic = artistic
+
+    def _get_font_path(self, font_class: str, language: str) -> str:
+        key = f"{language}_{font_class}"
+        return self.DEFAULT_FONTS.get(key, self.DEFAULT_FONTS["en_sans"])
+
+    def _get_colors(self, style_family: str) -> tuple[tuple, tuple]:
+        """返回 (背景色, 文本色)"""
+        color_schemes = {
+            "clean": ((255, 255, 255, 255), (21, 21, 21, 255)),
+            "decorative": ((247, 242, 232, 255), (58, 34, 93, 255)),
+            "poster": ((20, 20, 20, 255), (245, 230, 99, 255)),
+            "graffiti": ((15, 26, 43, 255), (121, 240, 255, 255)),
+        }
+        return color_schemes.get(style_family, color_schemes["clean"])
+
+    def _apply_artistic_effects(self, text_layer, style_family: str, seed: int):
+        """应用艺术效果（边框、阴影、凸起等）"""
+        if not self.artistic:
+            return
+
+        # 根据 style_family 添加不同效果
+        if style_family == "poster":
+            # 添加阴影效果
+            text_layer.shadow = (2, 2, 4, (0, 0, 0, 128))
+        elif style_family == "graffiti":
+            # 添加边框效果
+            text_layer.stroke = (2, (255, 255, 255, 200))
+
+    def render(
+        self,
+        *,
+        text: str,
+        out_dir: Path,
+        filename_stem: str,
+        seed: int,
+        layout_type: str,
+        style_family: str,
+        font_class: str,
+        degradation_profile: str,
+        language: str = "en",
+    ) -> RenderResult:
+        import random
+
+        import numpy as np
+        from PIL import Image
+
+        from synthtiger import components, layers
+
+        # 设置随机种子
+        random.seed(seed)
+        np.random.seed(seed)
+
+        # 获取颜色配置
+        bg_color, text_color = self._get_colors(style_family)
+
+        # 创建文本层
+        font_path = self._get_font_path(font_class, language)
+        font_size = 32
+
+        # 对于多行文本，按空格分割后创建多个文本层
+        if layout_type == "multiline_block":
+            words = text.split()
+            text_layers = []
+            for word in words:
+                layer = layers.TextLayer(
+                    text=word,
+                    path=font_path,
+                    size=font_size,
+                    color=text_color,
+                )
+                text_layers.append(layer)
+
+            # 创建图层组并应用流式布局
+            group = layers.Group(text_layers)
+            layout = components.FlowLayout(
+                space=(4, 4),
+                line_space=(8, 8),
+                length=(self.config.canvas_width - 40, self.config.canvas_width - 40),
+                align=("left", "left"),
+            )
+            layout.apply(group)
+
+            # 合并图层组为单个图层
+            text_layer = group.merge()
+            text_layer.center = (self.config.canvas_width // 2, self.config.canvas_height // 2)
+        else:
+            # 单行文本
+            text_layer = layers.TextLayer(
+                text=text,
+                path=font_path,
+                size=font_size,
+                color=text_color,
+            )
+            text_layer.center = (self.config.canvas_width // 2, self.config.canvas_height // 2)
+
+        # 创建背景层
+        bg_layer = layers.RectLayer(
+            color=bg_color,
+            size=(self.config.canvas_width, self.config.canvas_height)
+        )
+
+        # 应用艺术效果
+        self._apply_artistic_effects(text_layer, style_family, seed)
+
+        # 合成
+        bg_layer.paste(text_layer)
+
+        # 输出图像
+        img_array = bg_layer.output()
+        img = Image.fromarray(img_array.astype(np.uint8))
+
+        # 应用后处理（模糊等）
+        if degradation_profile in ("blur_low", "noise_medium"):
+            from PIL import ImageFilter
+            if degradation_profile == "blur_low":
+                img = img.filter(ImageFilter.GaussianBlur(radius=1))
+
+        # 保存
+        relpath = f"images/{filename_stem}.png"
+        img_path = out_dir / relpath
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(img_path)
+
+        return RenderResult(
+            image_relpath=relpath,
+            width=img.width,
+            height=img.height,
+            format="png",
+            background_type=self.config.background_type,
+            engine_primary="synthtiger",
+            engine_secondary="python-api",
+            template_id="tpl_synthtiger_v1",
+            font_id=f"{font_class}_synthtiger",
+            layout_meta={"layout_type": layout_type},
+            style_meta={"style_family": style_family, "language": language},
+            degradation_meta={"profile": degradation_profile},
+        )
+
+
+class TrdgRenderer(Renderer):
+    """真正的 TRDG 渲染器，通过 Python API 调用。"""
+
+    route_name = "route_trdg_basic"
+
+    # 语言映射表
+    LANGUAGE_MAP = {
+        "en": "en",
+        "zh": "cn",
+        "zh-cn": "cn",
+        "zh-tw": "cn",
+        "ja": "ja",
+        "ko": "ko",
+        "th": "th",
+    }
+
+    def _map_language(self, language: str) -> str:
+        return self.LANGUAGE_MAP.get(language.lower(), "en")
+
+    def _map_background(self, style_family: str) -> int:
+        # TRDG: 0=高斯噪声, 1=白色, 2=准晶体, 3=图片
+        mapping = {"clean": 1, "decorative": 0, "poster": 2, "graffiti": 0}
+        return mapping.get(style_family, 1)
+
+    def _get_blur_config(self, degradation_profile: str) -> tuple[int, bool]:
+        # 根据降质配置返回模糊参数
+        if degradation_profile == "clean":
+            return 0, False
+        if degradation_profile == "mild":
+            return 2, True
+        if degradation_profile == "heavy":
+            return 4, True
+        return 1, True
+
+    def render(
+        self,
+        *,
+        text: str,
+        out_dir: Path,
+        filename_stem: str,
+        seed: int,
+        layout_type: str,
+        style_family: str,
+        font_class: str,
+        degradation_profile: str,
+        language: str = "en",
+    ) -> RenderResult:
+        import random
+
+        from trdg.generators import GeneratorFromStrings
+
+        # TRDG 不支持 seed 参数，需要在外部设置随机种子
+        random.seed(seed)
+
+        blur, random_blur = self._get_blur_config(degradation_profile)
+
+        generator = GeneratorFromStrings(
+            strings=[text],
+            size=self.config.canvas_height,
+            blur=blur,
+            random_blur=random_blur,
+            background_type=self._map_background(style_family),
+            language=self._map_language(language),
+        )
+
+        img, lbl = next(generator)
+        _ = lbl  # label 不使用
+
+        relpath = f"images/{filename_stem}.jpg"
+        img_path = out_dir / relpath
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(img_path, quality=95)
+
+        return RenderResult(
+            image_relpath=relpath,
+            width=img.width,
+            height=img.height,
+            format="jpg",
+            background_type=self.config.background_type,
+            engine_primary="trdg",
+            engine_secondary="python-api",
+            template_id="tpl_trdg_v1",
+            font_id=f"{font_class}_trdg",
+            layout_meta={"layout_type": layout_type},
+            style_meta={"style_family": style_family, "language": language},
+            degradation_meta={"profile": degradation_profile},
+        )
+
+
 def build_renderer(route_name: str, executor: CommandExecutor) -> Renderer:
     if route_name == "route_trdg_basic":
-        return SvgTextRenderer(
+        try:
+            import trdg
+            _ = trdg  # 确认导入成功
+        except ImportError:
+            raise ImportError("TRDG 未安装。请运行: pip install trdg")
+        return TrdgRenderer(
             executor,
-            RouteConfig(route_name=route_name, canvas_width=320, canvas_height=96, background_type="solid", font_family="Arial"),
+            RouteConfig(route_name=route_name, canvas_width=320, canvas_height=96, background_type="generated", font_family="auto"),
         )
     if route_name == "route_synthtiger_multiline":
-        return SvgTextRenderer(
+        try:
+            import synthtiger
+            _ = synthtiger
+        except ImportError:
+            raise ImportError("SynthTiger 未安装。请运行: pip install synthtiger")
+        return SynthTigerRenderer(
             executor,
-            RouteConfig(route_name=route_name, canvas_width=768, canvas_height=220, background_type="textured_flat", font_family="Verdana"),
+            RouteConfig(route_name=route_name, canvas_width=768, canvas_height=220, background_type="generated", font_family="auto"),
+            artistic=False
         )
     if route_name == "route_synthtiger_svg_im":
-        return SvgImRenderer(
+        try:
+            import synthtiger
+            _ = synthtiger
+        except ImportError:
+            raise ImportError("SynthTiger 未安装。请运行: pip install synthtiger")
+        return SynthTigerRenderer(
             executor,
-            RouteConfig(route_name=route_name, canvas_width=1024, canvas_height=280, background_type="artistic", font_family="Impact"),
+            RouteConfig(route_name=route_name, canvas_width=1024, canvas_height=280, background_type="generated", font_family="auto"),
+            artistic=True  # 启用艺术效果
         )
     raise ValueError(f"Unknown route: {route_name}")
